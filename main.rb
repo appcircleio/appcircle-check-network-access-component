@@ -13,7 +13,7 @@ HEADER_KEYS = %w[server content-type content-length cache-control].freeze
 METRICS_FMT = %q({"code":"%{http_code}","effective_url":"%{url_effective}","time_total":"%{time_total}"})
 
 CURL_EXIT_MESSAGES = {
-  0 => "OK",
+  0 => "Operation successful",
   1 => "Unsupported protocol",
   2 => "Failed to initialize",
   3 => "URL malformed",
@@ -103,7 +103,7 @@ end
 
 def classify(code, exit_status)
   return [:fail, "transport error (exit #{exit_status})"] if exit_status != 0 || code == "000"
-  return [:ok, "ok"] if code.start_with?("2")
+  return [:success, "success"] if code.start_with?("2")
   return [:warn, "redirect"] if code.start_with?("3")
   return [:warn, "client error"] if code.start_with?("4")
   return [:fail, "server error"] if code.start_with?("5")
@@ -170,18 +170,21 @@ def check_endpoint(url)
 end
 
 def addresses_from_env
-  urls = []
-  urls << "https://github.com/appcircleio/" if env_true?("AC_CHECK_NETWORK_GITHUB_APPCIRCLE", default: true)
-  urls << "https://rubygems.org" if env_true?("AC_CHECK_NETWORK_RUBYGEMS", default: true)
-  urls << "https://index.rubygems.org" if env_true?("AC_CHECK_NETWORK_INDEX_RUBYGEMS", default: true)
-  urls << "https://services.gradle.org" if env_true?("AC_CHECK_NETWORK_SERVICES_GRADLE_ORG", default: true)
-  urls << "https://dl.google.com/android/repository/repository2-1.xml" if env_true?("AC_CHECK_NETWORK_DL_GOOGLE_COM_ANDROID_REPOSITORY", default: true)
-  urls << "https://dl-ssl.google.com/android/repository/repository2-1.xml" if env_true?("AC_CHECK_NETWORK_DL_SSL_GOOGLE_COM_ANDROID_REPOSITORY", default: true)
-  urls << "https://maven.google.com/web/index.html" if env_true?("AC_CHECK_NETWORK_MAVEN_GOOGLE_COM", default: true)
-  urls << "https://repo1.maven.org/maven2/" if env_true?("AC_CHECK_NETWORK_REPO1_MAVEN_ORG_MAVEN2", default: true)
-  urls << "https://cdn.cocoapods.org" if env_true?("AC_CHECK_NETWORK_CDCOAPODS_ORG", default: true)
-  urls << "https://github.com/CocoaPods/Specs" if env_true?("AC_CHECK_NETWORK_GITHUB_COCOAPODS_SPECS", default: true)
-  urls << "https://firebaseappdistribution.googleapis.com/$discovery/rest?version=v1" if env_true?("AC_CHECK_NETWORK_FIREBASEAPPDISTRIBUTION_GOOGLEAPIS_COM", default: true)
+  url_env_map = {
+    "https://github.com/appcircleio/" => "AC_CHECK_NETWORK_GITHUB_APPCIRCLE",
+    "https://rubygems.org" => "AC_CHECK_NETWORK_RUBYGEMS",
+    "https://index.rubygems.org" => "AC_CHECK_NETWORK_INDEX_RUBYGEMS",
+    "https://services.gradle.org" => "AC_CHECK_NETWORK_SERVICES_GRADLE_ORG",
+    "https://dl.google.com/android/repository/repository2-1.xml" => "AC_CHECK_NETWORK_DL_GOOGLE_COM_ANDROID_REPOSITORY",
+    "https://dl-ssl.google.com/android/repository/repository2-1.xml" => "AC_CHECK_NETWORK_DL_SSL_GOOGLE_COM_ANDROID_REPOSITORY",
+    "https://maven.google.com/web/index.html" => "AC_CHECK_NETWORK_MAVEN_GOOGLE_COM",
+    "https://repo1.maven.org/maven2/" => "AC_CHECK_NETWORK_REPO1_MAVEN_ORG_MAVEN2",
+    "https://cdn.cocoapods.org" => "AC_CHECK_NETWORK_CDCOAPODS_ORG",
+    "https://github.com/CocoaPods/Specs" => "AC_CHECK_NETWORK_GITHUB_COCOAPODS_SPECS",
+    "https://firebaseappdistribution.googleapis.com/$discovery/rest?version=v1" => "AC_CHECK_NETWORK_FIREBASEAPPDISTRIBUTION_GOOGLEAPIS_COM"
+  }
+
+  urls = url_env_map.select { |_, env| env_true?(env, default: true) }.keys
 
   if (extra = get_env_variable("AC_CHECK_NETWORK_EXTRA_URL_PARAMETERS"))
     urls.concat(extra.split(",").map(&:strip).reject(&:empty?))
