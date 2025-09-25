@@ -1,7 +1,7 @@
 platform: Common
 buildPlatform:
-displayName: Check Network Accessibility
-description: "Check the network access for Appcircle build module using pre-determined curl commands on runner."
+displayName: Check Network Access
+description: "Check network access to external services for the Appcircle build module."
 docsUrl: https://docs.appcircle.io/workflows/common-workflow-steps/check-network-accessibility
 requiredComponents:
 precedingComponents:
