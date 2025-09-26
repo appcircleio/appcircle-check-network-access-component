@@ -202,14 +202,21 @@ def addresses_from_env
 end
 
 def get_timeouts
-  connect_timeout = get_env_variable("AC_CHECK_CONNECTION_TIMEOUT") || "8"
-  max_time = get_env_variable("AC_CHECK_CONNECTION_MAX_TIMEOUT") || "20"
+  connect_timeout = get_env_variable("AC_CHECK_CONNECTION_TIMEOUT")
+  max_time = get_env_variable("AC_CHECK_CONNECTION_MAX_TIMEOUT")
 
   connect_timeout = Integer(connect_timeout) rescue 8
   max_time = Integer(max_time) rescue 20
 
-  connect_timeout = 8 if connect_timeout <= 0
-  max_time = 20 if max_time <= 0
+  if connect_timeout <= 0 || max_time <= 0
+    puts "Max Timeout or Connect Timeout should have a positive value. Setting back to defaults."
+    connect_timeout = 8
+    max_time = 20
+  end
+
+  if max_time < connect_timeout
+    abort_with_message("ERR: Max Timeout Value must be greater than Connect Timeout Value")
+  end
 
   puts "Using connection timeout: #{connect_timeout} seconds"
   puts "Using max time: #{max_time} seconds"
