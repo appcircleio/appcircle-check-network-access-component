@@ -6,9 +6,7 @@ require 'json'
 
 DIVIDER = "-" * 30
 DIVIDER_CURL = "-" * 60
-BODY_SNIPPET_LEN = 600
-CONNECT_TIMEOUT = "8"
-MAX_TIME = "20"
+BODY_SNIPPET_LEN = 800
 HEADER_KEYS = %w[server content-type content-length cache-control].freeze
 METRICS_FMT = %q({"code":"%{http_code}","effective_url":"%{url_effective}","time_total":"%{time_total}"})
 
@@ -63,7 +61,7 @@ def env_true?(key, default: false)
 end
 
 def run_command(args)
-  puts "command: #{Shellwords.join(args)}"
+  puts "command: #{Shellwords.join(args)}".blue
   stdout, _stderr, status = Open3.capture3(*args)
   { stdout: stdout, status: status.exitstatus }
 end
@@ -94,19 +92,30 @@ def label_for(code)
   case code
   when /^2/ then ["HTTP response is #{code}", :green]
   when /^3/ then ["Redirect — HTTP response is #{code}", :yellow]
-  when /^4/ then ["Client error — HTTP response is #{code}", :red]
-  when /^5/ then ["Server error — HTTP response is #{code}", :red]
+  when /^4/ then ["Client error — HTTP response is #{code}", :yellow]
+  when /^5/ then ["Server error — HTTP response is #{code}", :yellow]
   when "000" then ["Connection/timeout error", :red]
   else ["Unexpected — HTTP response is #{code}", :red]
   end
 end
 
 def classify(code, exit_status)
-  return [:fail, "transport error (exit #{exit_status})"] if exit_status != 0 || code == "000"
-  return [:success, "success"] if code.start_with?("2")
-  return [:warn, "redirect"] if code.start_with?("3")
-  return [:fail, "client error"] if code.start_with?("4")
-  return [:fail, "server error"] if code.start_with?("5")
+  return [:fail, "network error (exit #{exit_status})"] if exit_status != 0 || code == "000"
+
+  unreachable_codes = %w[502 503 504 407 408 421 425 429 511]
+
+  if unreachable_codes.include?(code)
+    return [:fail, "unreachable (#{code})"]
+  elsif code.start_with?("2")
+    return [:success, "success"]
+  elsif code.start_with?("3")
+    return [:warn, "redirect"]
+  elsif code.start_with?("4")
+    return [:warn, "client error"]
+  elsif code.start_with?("5")
+    return [:warn, "server error"]
+  end
+
   [:fail, "unexpected"]
 end
 
@@ -117,7 +126,7 @@ def section(text)
 end
 
 def print_result(url:, code:, is_2xx:, exit_code:, effective_url:, time_total:, headers:, body:, severity:)
-  puts "Checking: #{url}"
+  puts "Checking: #{url}".blue
   msg, color = label_for(code)
   puts msg.send(color)
   puts "Result: #{severity.to_s.upcase}"
@@ -126,9 +135,9 @@ def print_result(url:, code:, is_2xx:, exit_code:, effective_url:, time_total:, 
 
   diag = []
   exit_msg = CURL_EXIT_MESSAGES[exit_code] || "Unknown exit code"
-  diag << "curl_exit: #{exit_code} (#{exit_msg})"
+  diag << "curl_exit: #{exit_code} (#{exit_msg})".yellow
   diag << "url: #{effective_url}" unless effective_url.to_s.empty?
-  diag << "time_total: #{format('%.3fs', time_total.to_f)}" unless time_total.to_s.empty?
+  diag << "time_total: #{format('%.3fs', time_total.to_f)}".yellow unless time_total.to_s.empty?
 
   section(diag.join("\n"))
   section(headers)
@@ -137,11 +146,11 @@ def print_result(url:, code:, is_2xx:, exit_code:, effective_url:, time_total:, 
   puts
 end
 
-def check_endpoint(url)
+def check_endpoint(url, connect_timeout, max_time)
   tmpbody = "curl_body_#{Process.pid}.txt"
   tmphead = "curl_head_#{Process.pid}.txt"
   args = ["curl", "-s", "-o", tmpbody, "-D", tmphead, "-w", METRICS_FMT,
-          "--connect-timeout", CONNECT_TIMEOUT, "--max-time", MAX_TIME, url]
+          "--connect-timeout", connect_timeout.to_s, "--max-time", max_time.to_s, url]
 
   res = run_command(args)
   metrics = JSON.parse(res[:stdout].strip) rescue { "code" => "000" }
@@ -192,13 +201,31 @@ def addresses_from_env
   urls
 end
 
+def get_timeouts
+  connect_timeout = get_env_variable("AC_CHECK_CONNECTION_TIMEOUT") || "8"
+  max_time = get_env_variable("AC_CHECK_CONNECTION_MAX_TIMEOUT") || "20"
+
+  connect_timeout = Integer(connect_timeout) rescue 8
+  max_time = Integer(max_time) rescue 20
+
+  connect_timeout = 8 if connect_timeout <= 0
+  max_time = 20 if max_time <= 0
+
+  puts "Using connection timeout: #{connect_timeout} seconds"
+  puts "Using max time: #{max_time} seconds"
+
+  [connect_timeout, max_time]
+end
+
 def main
+  connect_timeout, max_time = get_timeouts
+
   addresses = addresses_from_env
   if addresses.empty?
     puts "There aren't any URLs given to the component, exiting."
     exit 0
   end
-  results = addresses.map { |url| [url, check_endpoint(url)] }
+  results = addresses.map { |url| [url, check_endpoint(url, connect_timeout, max_time)] }
   failed = results.select { |_, r| r[:severity] == :fail }
   unless failed.empty?
     lines = failed.map { |url, r| "#{url} — #{r[:code]} (#{r[:reason]})" }
