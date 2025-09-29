@@ -92,30 +92,19 @@ def label_for(code)
   case code
   when /^2/ then ["HTTP response is #{code}", :green]
   when /^3/ then ["Redirect — HTTP response is #{code}", :yellow]
-  when /^4/ then ["Client error — HTTP response is #{code}", :yellow]
-  when /^5/ then ["Server error — HTTP response is #{code}", :yellow]
+  when /^4/ then ["Client error — HTTP response is #{code}", :red]
+  when /^5/ then ["Server error — HTTP response is #{code}", :red]
   when "000" then ["Connection/timeout error", :red]
   else ["Unexpected — HTTP response is #{code}", :red]
   end
 end
 
 def classify(code, exit_status)
-  return [:fail, "network error (exit #{exit_status})"] if exit_status != 0 || code == "000"
-
-  unreachable_codes = %w[502 503 504 407 408 421 425 429 511]
-
-  if unreachable_codes.include?(code)
-    return [:fail, "unreachable (#{code})"]
-  elsif code.start_with?("2")
-    return [:success, "success"]
-  elsif code.start_with?("3")
-    return [:warn, "redirect"]
-  elsif code.start_with?("4")
-    return [:warn, "client error"]
-  elsif code.start_with?("5")
-    return [:warn, "server error"]
-  end
-
+  return [:fail, "transport error (exit #{exit_status})"] if exit_status != 0 || code == "000"
+  return [:ok, "ok"] if code.start_with?("2")
+  return [:warn, "redirect"] if code.start_with?("3")
+  return [:fail, "client error"] if code.start_with?("4")
+  return [:fail, "server error"] if code.start_with?("5")
   [:fail, "unexpected"]
 end
 
