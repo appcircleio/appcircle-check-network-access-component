@@ -101,7 +101,7 @@ end
 
 def classify(code, exit_status)
   return [:fail, "transport error (exit #{exit_status})"] if exit_status != 0 || code == "000"
-  return [:ok, "ok"] if code.start_with?("2")
+  return [:success, "success"] if code.start_with?("2")
   return [:warn, "redirect"] if code.start_with?("3")
   return [:fail, "client error"] if code.start_with?("4")
   return [:fail, "server error"] if code.start_with?("5")
