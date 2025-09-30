@@ -11,7 +11,7 @@ HEADER_KEYS = %w[server content-type content-length cache-control].freeze
 METRICS_FMT = %q({"code":"%{http_code}","effective_url":"%{url_effective}","time_total":"%{time_total}"})
 
 CURL_EXIT_MESSAGES = {
-  0 => "Operation successful",
+  0 => "Successful completion",
   1 => "Unsupported protocol",
   2 => "Failed to initialize",
   3 => "URL malformed",
@@ -43,7 +43,22 @@ CURL_EXIT_MESSAGES = {
   99 => "QUIC connection error",
   100 => "Other connection setup error"
 }.freeze
-
+HTTP_STATUS_MESSAGES = {
+  200 => "OK. The request has succeeded.",
+  301 => "Moved Permanently. The resource has been assigned a new URL.",
+  302 => "Found. The resource resides temporarily under a different URI.",
+  400 => "Bad Request. The server could not understand the request.",
+  401 => "Unauthorized. Authentication is required or has failed.",
+  403 => "Forbidden. Access to the resource was denied.",
+  404 => "Not Found. The requested resource does not exist.",
+  405 => "Method Not Allowed. The request method is not supported.",
+  429 => "Too Many Requests. You have sent too many requests in a given time frame.",
+  500 => "Internal Server Error.",
+  501 => "Not Implemented. The server does not support this functionality.",
+  502 => "Bad Gateway. The server received an invalid response from an upstream server.",
+  503 => "Service Unavailable. The server is overloaded or under maintenance.",
+  504 => "Gateway Timeout. The upstream server failed to respond in time."
+}.freeze
 def abort_with_message(msg)
   msg.to_s.strip.split("\n").each { |line| puts "@@[error] #{line}".red }
   abort
@@ -61,7 +76,7 @@ def env_true?(key, default: false)
 end
 
 def run_command(args)
-  puts "command: #{Shellwords.join(args)}".blue
+  puts "@@[command] #{Shellwords.join(args)}".blue
   stdout, _stderr, status = Open3.capture3(*args)
   { stdout: stdout, status: status.exitstatus }
 end
@@ -114,7 +129,7 @@ def section(text)
   puts text
 end
 
-def print_result(url:, code:, is_2xx:, exit_code:, effective_url:, time_total:, headers:, body:, severity:)
+def print_result(url:, code:, is_2xx:, exit_code:, effective_url:, time_total:, headers:, body:, severity:, connect_timeout:, max_time:)
   puts "Checking: #{url}".blue
   msg, color = label_for(code)
   puts msg.send(color)
@@ -122,17 +137,46 @@ def print_result(url:, code:, is_2xx:, exit_code:, effective_url:, time_total:, 
 
   return puts("#{DIVIDER}\n\n") if is_2xx
 
-  diag = []
-  exit_msg = CURL_EXIT_MESSAGES[exit_code] || "Unknown exit code"
-  diag << "curl_exit: #{exit_code} (#{exit_msg})".yellow
-  diag << "url: #{effective_url}" unless effective_url.to_s.empty?
-  diag << "time_total: #{format('%.3fs', time_total.to_f)}".yellow unless time_total.to_s.empty?
+  explanation = get_better_explanation(code, exit_code, time_total, connect_timeout, max_time, effective_url)
+  puts explanation unless explanation.to_s.strip.empty?
 
-  section(diag.join("\n"))
+  section("time_total: #{format('%.3fs', time_total.to_f)}".yellow) unless time_total.to_s.empty?
   section(headers)
   section(body)
   puts DIVIDER_CURL
   puts
+end
+def get_better_explanation(code, exit_code, time_total, connect_timeout, max_time, effective_url)
+  messages = []
+
+  exit_msg = CURL_EXIT_MESSAGES[exit_code] || "Unknown exit code"
+  # Curl side
+  if exit_code == 28
+    if time_total.to_f >= max_time.to_f
+      messages << "Curl exit #{exit_code}: Operation timed out after reaching the maximum time limit (#{max_time}s).".yellow
+    elsif time_total.to_f >= connect_timeout.to_f
+      messages << "Curl exit #{exit_code}: Connection could not be established within #{connect_timeout}s.".yellow
+    else
+      messages << "Curl exit #{exit_code}: Operation timed out.".yellow
+    end
+  else
+    messages << "Curl exit #{exit_code}: #{exit_msg}".yellow
+  end
+
+  # HTTP side
+  unless code.to_s == "000"
+    explanation = HTTP_STATUS_MESSAGES[code.to_i] || "Unexpected response."
+    color = case code
+            when /^2/ then :green
+            when /^3/ then :yellow
+            else :red
+            end
+    msg = "HTTP #{code}: #{explanation}".send(color)
+    msg += " Final destination: #{effective_url}" if code.start_with?("3") && !effective_url.to_s.empty?
+    messages << msg
+  end
+
+  messages.join("\n")
 end
 
 def check_endpoint(url, connect_timeout, max_time)
@@ -158,7 +202,9 @@ def check_endpoint(url, connect_timeout, max_time)
     time_total: metrics["time_total"],
     headers: headers,
     body: body,
-    severity: severity
+    severity: severity,
+    connect_timeout: connect_timeout,
+    max_time: max_time
   )
 
   File.delete(tmpbody) rescue nil
