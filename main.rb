@@ -5,13 +5,45 @@ require 'shellwords'
 require 'json'
 require 'net/http'
 require 'yaml'
-require_relative "curl_exit_codes"
 
 DIVIDER = "-" * 6
 DIVIDER_CURL = "-" * 60
 BODY_SNIPPET_LEN = 800
 HEADER_KEYS = %w[server content-type content-length cache-control].freeze
 METRICS_FMT = %q({"code":"%{http_code}","effective_url":"%{url_effective}","time_total":"%{time_total}"})
+CURL_EXIT_MESSAGES = {
+  0 => "Successful completion",
+  1 => "Unsupported protocol",
+  2 => "Failed to initialize",
+  3 => "URL malformed",
+  5 => "Could not resolve proxy",
+  6 => "Could not resolve host",
+  7 => "Failed to connect to host",
+  8 => "Weird server reply",
+  9 => "Access denied to a resource",
+  22 => "HTTP error >= 400 returned",
+  23 => "Write error",
+  26 => "Read error",
+  27 => "Out of memory",
+  28 => "Operation timeout",
+  35 => "SSL connect error",
+  47 => "Too many redirects",
+  51 => "SSL certificate not OK",
+  52 => "Empty reply from server",
+  55 => "Failed sending network data",
+  56 => "Failure in receiving network data",
+  60 => "Peer certificate cannot be authenticated",
+  77 => "Problem with SSL CA cert",
+  78 => "Resource does not exist",
+  80 => "Failed to shut down SSL connection",
+  82 => "Could not load CRL file",
+  83 => "Issuer check failed",
+  90 => "Requested TLS level failed",
+  97 => "Operation failed in SSL layer",
+  98 => "HTTP/3 error",
+  99 => "QUIC connection error",
+  100 => "Other connection setup error"
+}.freeze
 
 def abort_with_message(msg)
   msg.to_s.strip.split("\n").each { |line| puts "@@[error] #{line}".red }
