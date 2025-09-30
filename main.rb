@@ -3,62 +3,16 @@ require 'open3'
 require 'colored'
 require 'shellwords'
 require 'json'
+require 'net/http'
+require 'yaml'
 
-DIVIDER = "-" * 30
+DIVIDER = "-" * 6
 DIVIDER_CURL = "-" * 60
 BODY_SNIPPET_LEN = 800
 HEADER_KEYS = %w[server content-type content-length cache-control].freeze
 METRICS_FMT = %q({"code":"%{http_code}","effective_url":"%{url_effective}","time_total":"%{time_total}"})
+CURL_EXIT_MESSAGES = YAML.load_file(File.join(__dir__, "curl_exit_messages.yaml"))
 
-CURL_EXIT_MESSAGES = {
-  0 => "Successful completion",
-  1 => "Unsupported protocol",
-  2 => "Failed to initialize",
-  3 => "URL malformed",
-  5 => "Could not resolve proxy",
-  6 => "Could not resolve host",
-  7 => "Failed to connect to host",
-  8 => "Weird server reply",
-  9 => "Access denied to a resource",
-  22 => "HTTP error >= 400 returned",
-  23 => "Write error",
-  26 => "Read error",
-  27 => "Out of memory",
-  28 => "Operation timeout",
-  35 => "SSL connect error",
-  47 => "Too many redirects",
-  51 => "SSL certificate not OK",
-  52 => "Empty reply from server",
-  55 => "Failed sending network data",
-  56 => "Failure in receiving network data",
-  60 => "Peer certificate cannot be authenticated",
-  77 => "Problem with SSL CA cert",
-  78 => "Resource does not exist",
-  80 => "Failed to shut down SSL connection",
-  82 => "Could not load CRL file",
-  83 => "Issuer check failed",
-  90 => "Requested TLS level failed",
-  97 => "Operation failed in SSL layer",
-  98 => "HTTP/3 error",
-  99 => "QUIC connection error",
-  100 => "Other connection setup error"
-}.freeze
-HTTP_STATUS_MESSAGES = {
-  200 => "OK. The request has succeeded.",
-  301 => "Moved Permanently. The resource has been assigned a new URL.",
-  302 => "Found. The resource resides temporarily under a different URI.",
-  400 => "Bad Request. The server could not understand the request.",
-  401 => "Unauthorized. Authentication is required or has failed.",
-  403 => "Forbidden. Access to the resource was denied.",
-  404 => "Not Found. The requested resource does not exist.",
-  405 => "Method Not Allowed. The request method is not supported.",
-  429 => "Too Many Requests. You have sent too many requests in a given time frame.",
-  500 => "Internal Server Error.",
-  501 => "Not Implemented. The server does not support this functionality.",
-  502 => "Bad Gateway. The server received an invalid response from an upstream server.",
-  503 => "Service Unavailable. The server is overloaded or under maintenance.",
-  504 => "Gateway Timeout. The upstream server failed to respond in time."
-}.freeze
 def abort_with_message(msg)
   msg.to_s.strip.split("\n").each { |line| puts "@@[error] #{line}".red }
   abort
@@ -67,12 +21,6 @@ end
 def get_env_variable(key)
   v = ENV[key]
   v && !v.strip.empty? ? v : nil
-end
-
-def env_true?(key, default: false)
-  v = get_env_variable(key)
-  return default if v.nil?
-  %w[true 1 yes on].include?(v.strip.downcase)
 end
 
 def run_command(args)
@@ -135,17 +83,26 @@ def print_result(url:, code:, is_2xx:, exit_code:, effective_url:, time_total:, 
   puts msg.send(color)
   puts "Result: #{severity.to_s.upcase}"
 
-  return puts("#{DIVIDER}\n\n") if is_2xx
+  return puts("#{DIVIDER_CURL}\n\n") if is_2xx
 
   explanation = get_better_explanation(code, exit_code, time_total, connect_timeout, max_time, effective_url)
   puts explanation unless explanation.to_s.strip.empty?
 
-  section("time_total: #{format('%.3fs', time_total.to_f)}".yellow) unless time_total.to_s.empty?
   section(headers)
   section(body)
   puts DIVIDER_CURL
   puts
 end
+
+def http_status_message(code)
+  klass = Net::HTTPResponse::CODE_TO_OBJ[code.to_s]
+  return "Unexpected response." unless klass
+  name = klass.name.split("::").last
+  msg = name.sub(/^HTTP/, "")
+            .gsub(/([a-z])([A-Z])/, '\1 \2')
+  msg.strip
+end
+
 def get_better_explanation(code, exit_code, time_total, connect_timeout, max_time, effective_url)
   messages = []
 
@@ -161,18 +118,19 @@ def get_better_explanation(code, exit_code, time_total, connect_timeout, max_tim
     end
   else
     messages << "Curl exit #{exit_code}: #{exit_msg}".yellow
+    messages << "Total time: #{format('%.3fs', time_total.to_f)}".yellow unless time_total.to_s.empty?
   end
 
   # HTTP side
   unless code.to_s == "000"
-    explanation = HTTP_STATUS_MESSAGES[code.to_i] || "Unexpected response."
+    explanation = http_status_message(code.to_i)
     color = case code
             when /^2/ then :green
             when /^3/ then :yellow
             else :red
             end
     msg = "HTTP #{code}: #{explanation}".send(color)
-    msg += " Final destination: #{effective_url}" if code.start_with?("3") && !effective_url.to_s.empty?
+    msg += " -> #{effective_url}" if code.start_with?("3") && !effective_url.to_s.empty?
     messages << msg
   end
 
@@ -228,7 +186,7 @@ def addresses_from_env
     "https://firebaseappdistribution.googleapis.com/$discovery/rest?version=v1" => "AC_CHECK_NETWORK_FIREBASEAPPDISTRIBUTION_GOOGLEAPIS_COM"
   }
 
-  urls = url_env_map.select { |_, env| env_true?(env, default: true) }.keys
+  urls = url_env_map.select { |_, env| get_env_variable(env) == "true" }.keys
 
   if (extra = get_env_variable("AC_CHECK_NETWORK_EXTRA_URL_PARAMETERS"))
     urls.concat(extra.split(",").map(&:strip).reject(&:empty?))
@@ -252,10 +210,10 @@ def get_timeouts
   if max_time < connect_timeout
     abort_with_message("ERR: Max Timeout Value must be greater than Connect Timeout Value")
   end
-
+  puts DIVIDER_CURL
   puts "Using connection timeout: #{connect_timeout} seconds"
   puts "Using max time: #{max_time} seconds"
-
+  puts DIVIDER_CURL
   [connect_timeout, max_time]
 end
 
