@@ -1,4 +1,4 @@
-{
+CURL_EXIT_MESSAGES = {
   0 => "Successful completion",
   1 => "Unsupported protocol",
   2 => "Failed to initialize",
@@ -30,4 +30,4 @@
   98 => "HTTP/3 error",
   99 => "QUIC connection error",
   100 => "Other connection setup error"
-}
+}.freeze

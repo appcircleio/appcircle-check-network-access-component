@@ -5,13 +5,13 @@ require 'shellwords'
 require 'json'
 require 'net/http'
 require 'yaml'
+require_relative "curl_exit_codes"
 
 DIVIDER = "-" * 6
 DIVIDER_CURL = "-" * 60
 BODY_SNIPPET_LEN = 800
 HEADER_KEYS = %w[server content-type content-length cache-control].freeze
 METRICS_FMT = %q({"code":"%{http_code}","effective_url":"%{url_effective}","time_total":"%{time_total}"})
-CURL_EXIT_MESSAGES = eval(File.read(File.join(__dir__, "curl_exit_messages.rb")))
 
 def abort_with_message(msg)
   msg.to_s.strip.split("\n").each { |line| puts "@@[error] #{line}".red }
